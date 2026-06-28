@@ -138,7 +138,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧪 PharmAgent Pro — Enterprise Reference RAG Platform")
+st.title("🧪 PharmAgent Pro")
 st.caption("Persistent Document Intelligence & Multi-Source Audit Workspace")
 st.markdown("---")
 
