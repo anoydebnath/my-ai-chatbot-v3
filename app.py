@@ -12,6 +12,21 @@ from fpdf import FPDF
 import requests
 from urllib.parse import quote
 
+# === NEW IMPORTS FOR ENHANCED MODE SUPPORT ===
+from prompt_engine_enhanced import (
+    build_prompt_for_mode,
+    get_system_prompt,
+    SYSTEM_PROMPTS as ENHANCED_SYSTEM_PROMPTS
+)
+
+from pharma_engine_enhanced import (
+    detect_analysis_mode,
+    assess_response_completeness,
+    detect_pharma_domain,
+    optimize_search_depth
+)
+# =============================================
+
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -195,40 +210,7 @@ def get_groq_client():
         raise ValueError("GROQ_API_KEY missing.")
     return Groq(api_key=key)
 
-# --- 7. WEB SEARCH FUNCTION ---
-def web_search(query: str, max_results: int = 5) -> List[Dict]:
-    """
-    Search the web using DuckDuckGo-like approach.
-    Returns list of {title, link, snippet}
-    """
-    try:
-        # Using a simple web search approach
-        search_url = f"https://api.search.brave.com/res/v1/web/search?q={quote(query)}&count={max_results}"
-        headers = {"Accept": "application/json"}
-        
-        # For this implementation, we'll use a fallback approach
-        # In production, use your preferred search API (Google, Brave, etc.)
-        return search_fallback(query, max_results)
-    except Exception as e:
-        logger.warning(f"Web search failed: {e}")
-        return []
-
-def search_fallback(query: str, max_results: int = 5) -> List[Dict]:
-    """Fallback web search using requests"""
-    try:
-        # Using DuckDuckGo via requests (no API key needed for basic use)
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        # Note: In production, integrate with Brave API, Google Search API, or similar
-        # For now, returning structured format that can be enhanced
-        return []
-    except Exception as e:
-        logger.warning(f"Search fallback failed: {e}")
-        return []
-
-# --- 8. PERSISTENT CHAT HISTORY INITIALIZATION ---
+# --- 7. PERSISTENT CHAT HISTORY INITIALIZATION ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -246,7 +228,7 @@ for idx, msg in enumerate(st.session_state.messages):
                 f"Mode: {meta.get('mode', 'N/A')}"
             )
 
-# --- 9. STREAMING HELPER LOGIC ---
+# --- 8. STREAMING HELPER LOGIC ---
 SYSTEM_PROMPTS = {
     "default": (
         "You are an expert pharmaceutical data extraction engine, lead regulatory compliance auditor, and expert QC document writer. "
@@ -385,7 +367,7 @@ def generate_response(provider_name: str, model: str, prompt: str, stream: bool,
                 raise
             time.sleep(wait if "rate" in err_str.lower() or "429" in err_str else delays[attempt])
 
-# --- 10. CONTEXT & PROMPT BUILDERS ---
+# --- 9. CONTEXT & PROMPT BUILDERS ---
 def assemble_context(docs: List) -> Tuple[str, List[Dict]]:
     blocks, refs = [], []
     for idx, d in enumerate(docs, 1):
@@ -395,233 +377,22 @@ def assemble_context(docs: List) -> Tuple[str, List[Dict]]:
         refs.append({"index": idx, "source": source, "page": page})
     return "\n\n--- Document Chunk ---\n\n".join(blocks), refs
 
-def build_prompt_indepth_db(user_query: str, context: str, search_depth: int) -> str:
-    """In-depth knowledge from database"""
-    return f"""You are a pharmaceutical specialist with access to internal documentation.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: In-depth Database Knowledge Extraction
-CHUNKS ANALYZED: {search_depth}
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Provide COMPLETE, detailed information extracted directly from the provided documents
-2. Include ALL relevant details, specifications, parameters, and procedures
-3. Use inline citations: [Source: filename | Page: N]
-4. Organize with clear sections and hierarchies
-5. Preserve exact numerical values, specifications, and technical details
-6. Use LaTeX for mathematical expressions: $inline$ and $$block$$
-7. Format tables in Markdown
-8. End with "📋 REFERENCE METADATA" section listing:
-   - Documents used with page numbers
-   - Key parameters verified
-   - Standards referenced (USP/BP/Ph.Eur./ICH)
-
-DOCUMENT CONTEXT:
-{context}
-
-DETAILED ANALYSIS:"""
-
-def build_prompt_summary_db(user_query: str, context: str, search_depth: int) -> str:
-    """Summary from database"""
-    return f"""You are a pharmaceutical data analyst specializing in concise summaries.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: Database Summary
-CHUNKS ANALYZED: {search_depth}
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Synthesize key findings from documents in a concise format
-2. Focus on the most critical information and decision points
-3. Structure as: Overview → Key Findings → Critical Parameters → Conclusions
-4. Include citations: [Source: filename | Page: N]
-5. Keep paragraphs focused and direct
-6. Use bullet points for key takeaways
-7. Limit to essential information only
-8. End with "📋 REFERENCE METADATA" section
-
-DOCUMENT CONTEXT:
-{context}
-
-EXECUTIVE SUMMARY:"""
-
-def build_prompt_sop_style(user_query: str, context: str, search_depth: int) -> str:
-    """SOP Style formatting"""
-    return f"""You are an expert pharmaceutical SOP writer.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: Standard Operating Procedure (SOP) Format
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-FORMAT YOUR RESPONSE WITH THESE SECTIONS (Numbered):
-1. PURPOSE
-   - Clear objective statement
-
-2. SCOPE
-   - Applicability and boundaries
-
-3. RESPONSIBILITIES
-   - Personnel roles (numbered list)
-
-4. TRAINING REQUIREMENTS
-   - Required training for personnel
-
-5. ASSOCIATED DOCUMENTS
-   - Reference documents and SOPs
-
-6. ABBREVIATIONS AND DEFINITIONS
-   - Format as: TERM : Definition
-
-7. PRECAUTIONS
-   - Safety and quality measures (numbered list)
-
-8. PROCEDURE
-   - Main steps with hierarchy (8.1, 8.1.1, 8.1.1.1 format)
-
-9. REFERENCES
-   - Standards: USP, BP, Ph.Eur., ICH, etc.
-
-10. APPENDICES
-    - Supporting documents and forms
-
-FORMATTING RULES:
-- Use numbered sections with underlines for main sections
-- Use hierarchical numbering (8.1, 8.1.1, 8.1.1.1)
-- Include [Source: filename | Page: N] citations
-- Use tables for complex information
-- Preserve exact specifications from documents
-- Use LaTeX for chemical formulas and math
-
-DOCUMENT CONTEXT:
-{context}
-
-STANDARD OPERATING PROCEDURE:"""
-
-def build_prompt_indepth_online(user_query: str, db_context: str, online_context: str = None, search_depth: int = 12) -> str:
-    """In-depth knowledge + online"""
-    online_section = ""
-    if online_context:
-        online_section = f"\nONLINE RESEARCH FINDINGS:\n{online_context}"
+def get_mode_system_prompt(mode: str) -> str:
+    """Get system prompt for mode using enhanced engine"""
+    mode_map = {
+        "📚 In-depth Knowledge (Database)": "indepth",
+        "📄 Summary (Database)": "summary",
+        "📋 SOP Style": "sop",
+        "✅ Regulatory Audit Checklist": "audit",
+        "📚 In-depth + Online": "hybrid",
+        "🌐 Online Only": "online",
+        "📊 Summary + Online": "summary"
+    }
     
-    return f"""You are a pharmaceutical specialist with access to both proprietary documents and external research.
+    mode_key = mode_map.get(mode, "default")
+    return get_system_prompt(mode_key)
 
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: In-depth Database + Online Research
-DATABASE CHUNKS: {search_depth}
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Synthesize information from BOTH database and online sources
-2. Clearly distinguish between internal database findings and external research
-3. Start with database information, then add complementary online insights
-4. Include ALL relevant details with proper citations:
-   - Database: [Database: filename | Page: N]
-   - Online: [Online: source title]
-5. Highlight agreements and discrepancies between sources
-6. Use sections: Database Findings → Online Research → Integrated Analysis
-7. Use LaTeX for chemical expressions
-8. Format as: Details → [Citations] → Implications
-9. End with comprehensive metadata
-
-DATABASE CONTEXT:
-{db_context}
-{online_section}
-
-COMPREHENSIVE ANALYSIS:"""
-
-def build_prompt_online_only(user_query: str) -> str:
-    """Online only"""
-    return f"""You are a pharmaceutical research analyst with access to online resources.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: Online Research Only
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Provide comprehensive answer based on current online research
-2. Focus on peer-reviewed sources, official guidelines, and authoritative databases
-3. Include relevant standards: USP, BP, Ph.Eur., ICH, FDA, EMA
-4. Cite sources: [Source: organization/publication title]
-5. Structure: Overview → Current Standards → Best Practices → References
-6. Include relevant specifications, procedures, and technical details
-7. Note publication dates for time-sensitive information
-8. Use LaTeX for chemical expressions
-9. End with "📚 SOURCES REFERENCED" section
-
-ANALYTICAL RESPONSE:"""
-
-def build_prompt_summary_online(user_query: str, db_summary: str = None, online_summary: str = None) -> str:
-    """Summary + online"""
-    db_section = f"DATABASE SUMMARY:\n{db_summary}\n\n" if db_summary else ""
-    online_section = f"ONLINE RESEARCH SUMMARY:\n{online_summary}\n\n" if online_summary else ""
-    
-    return f"""You are a pharmaceutical analyst specializing in concise synthesis.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: Database + Online Summary
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Combine database and online findings into ONE concise summary
-2. Extract only critical information
-3. Structure: Key Points → Standards Alignment → Practical Implications
-4. Keep each section to 2-3 sentences maximum
-5. Include citations: [Database: file] [Online: source]
-6. Use bullet format for takeaways
-7. End with "📋 REFERENCES" section
-
-{db_section}{online_section}
-EXECUTIVE SUMMARY:"""
-
-def build_prompt_audit_checklist(user_query: str, context: str, search_depth: int) -> str:
-    """Regulatory audit checklist with references"""
-    return f"""You are a pharmaceutical regulatory compliance auditor.
-
-USER QUERY: {user_query}
-
-ANALYSIS TYPE: Regulatory Audit Checklist with References
-CHUNKS ANALYZED: {search_depth}
-TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-INSTRUCTIONS:
-1. Create comprehensive compliance checklist
-2. Cross-reference with USP/BP/Ph.Eur./ICH/FDA standards
-3. For EACH item, include:
-   - Requirement statement
-   - Status: ✅ Compliant | ⚠️ Partial | ❌ Non-Compliant
-   - Reference: [Document: filename | Page: N]
-   - Finding details
-   - Remediation (if needed)
-
-4. Format as table:
-   | Requirement | Status | Reference | Finding | Remediation |
-   |---|---|---|---|---|
-
-5. Include sections:
-   - Documentation Requirements
-   - Technical Specifications
-   - Quality Standards
-   - Training & Competency
-   - Audit & Monitoring
-   - Corrective Actions
-
-6. Use visual indicators: ✅/⚠️/❌
-7. Flag critical gaps with 🚨
-8. Include applicability standard for each item
-
-DOCUMENT CONTEXT:
-{context}
-
-AUDIT CHECKLIST:"""
-
-# --- 11. HIGH-FIDELITY PDF GENERATOR ENGINE (ENHANCED) ---
+# --- 10. HIGH-FIDELITY PDF GENERATOR ENGINE ---
 class ReportPDF(FPDF):
     def __init__(self, title_text="PHARMACEUTICAL COMPLIANCE REPORT"):
         super().__init__()
@@ -766,7 +537,7 @@ def draw_pdf_table(pdf, headers, rows):
     for header in headers:
         pdf.cell(col_width, 6, clean_for_pdf_latin1(header), 1, 0, 'C', True)
     pdf.ln()
-    pdf.set_font("Helvetica", "", 7)
+    pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(60, 60, 60)
     for row in rows:
         while len(row) < num_cols:
@@ -776,7 +547,7 @@ def draw_pdf_table(pdf, headers, rows):
         pdf.ln()
     pdf.ln(2)
 
-# --- 12. SIDEBAR CONFIGURATION ---
+# --- 11. SIDEBAR CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ Settings")
 
@@ -814,7 +585,7 @@ with st.sidebar:
     show_tokens    = st.toggle("🔢 Show Token Usage", value=True)
     show_sources   = st.toggle("📚 Show Source Traces", value=True)
 
-# --- 13. MAIN INTERFACE RENDERING ---
+# --- 12. MAIN INTERFACE RENDERING ---
 st.markdown(
     f"<div style='background:{pinfo['color']}15; border-left:4px solid {pinfo['color']};"
     f"padding:10px 16px; border-radius:6px; margin-bottom:16px;'>"
@@ -830,7 +601,7 @@ user_query = st.text_area(
     height=110
 )
 
-# --- 14. EXECUTION PROCESSOR ---
+# --- 13. EXECUTION PROCESSOR ---
 if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
     if not user_query.strip():
         st.error("❌ Please enter a query before executing.")
@@ -854,7 +625,7 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
                 progress_bar.progress(20)
                 t0 = time.time()
 
-                # --- FIX: THIS BLOCK IS NOW PROPERLY INDENTED ---
+                # --- DATABASE SEARCH ---
                 query_vector = db["embeddings"].embed_query(user_query)
 
                 results = db["index"].query(
@@ -877,7 +648,7 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
                     )
 
                 search_time = time.time() - t0
-                # ------------------------------------------------
+                # -----------------------------------------------
 
                 if docs:
                     db_context, metadata_refs = assemble_context(docs)
@@ -894,24 +665,26 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
             status_text.text("Step 2/3: Structuring extraction parameters...")
             progress_bar.progress(50)
             
-            if mode_key == "📚 In-depth Knowledge (Database)":
-                prompt = build_prompt_indepth_db(user_query, db_context, search_depth)
-            elif mode_key == "📄 Summary (Database)":
-                prompt = build_prompt_summary_db(user_query, db_context, search_depth)
-            elif mode_key == "📋 SOP Style":
-                prompt = build_prompt_sop_style(user_query, db_context, search_depth)
-                system_prompt = SYSTEM_PROMPTS["sop"]
-            elif mode_key == "✅ Regulatory Audit Checklist":
-                prompt = build_prompt_audit_checklist(user_query, db_context, search_depth)
-                system_prompt = SYSTEM_PROMPTS["audit"]
-            elif mode_key == "📚 In-depth + Online":
-                # TODO: Integrate web search
-                prompt = build_prompt_indepth_online(user_query, db_context, "", search_depth)
-            elif mode_key == "📊 Summary + Online":
-                # TODO: Integrate web search
-                prompt = build_prompt_summary_online(user_query, db_context, "")
-            elif mode_key == "🌐 Online Only":
-                prompt = build_prompt_online_only(user_query)
+            try:
+                # === USE ENHANCED PROMPT BUILDER ===
+                prompt = build_prompt_for_mode(
+                    mode=mode_key,
+                    user_query=user_query,
+                    context=db_context,
+                    search_depth=search_depth,
+                    online_context=None
+                )
+                
+                # Get mode-specific system prompt
+                system_prompt = get_mode_system_prompt(mode_key)
+                # ===================================
+                
+            except Exception as e:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"❌ Prompt generation failed: {str(e)}")
+                logger.error(f"Prompt error: {e}")
+                st.stop()
 
             # Step 3: Generate Response
             status_text.text(f"Step 3/3: Running via {provider_name}...")
@@ -933,6 +706,12 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
                     mode=mode_key
                 )
 
+            # === ASSESS RESPONSE QUALITY ===
+            quality_metrics = assess_response_completeness(output_text, mode_key)
+            gen_metadata["quality_metrics"] = quality_metrics
+            gen_metadata["completeness_score"] = quality_metrics.get("completeness", 0.0)
+            # ===============================
+
             st.session_state.messages.append({
                 "role": "assistant", 
                 "content": output_text,
@@ -944,6 +723,15 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
             time.sleep(0.5)
             progress_bar.empty()
             status_text.empty()
+            
+            # Show quality indicator
+            completeness = quality_metrics["completeness"]
+            if completeness >= 0.85:
+                st.success(f"✅ Response Quality: Excellent ({completeness:.0%})")
+            elif completeness >= 0.65:
+                st.info(f"ℹ️ Response Quality: Good ({completeness:.0%})")
+            else:
+                st.warning(f"⚠️ Response Quality: Adequate ({completeness:.0%}) - Consider refining your query")
             
             # Show references if enabled
             if show_sources and metadata_refs:
@@ -960,7 +748,7 @@ if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
             st.error(f"❌ Execution paused: {err}")
             logger.error(f"Execution error: {err}")
 
-# --- 15. EXPORT PANEL ---
+# --- 14. EXPORT PANEL ---
 if len(st.session_state.messages) > 0:
     st.markdown("---")
     st.subheader("📥 Export Active Analysis")
