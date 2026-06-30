@@ -196,8 +196,9 @@ db = init_vector_db()
 tokenizer = get_tokenizer()
 
 # --- 6. LLM CLIENT FACTORIES ---
-def get_gemini_client():
-import google.generativeai as genai
+if provider == "Gemini":  # Line 199
+    import google.generativeai as genai  # Line 200 (Must be indented 4 spaces!)
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 # 1. Configure your free API Key
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
