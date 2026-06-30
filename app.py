@@ -197,8 +197,17 @@ tokenizer = get_tokenizer()
 
 # --- 6. LLM CLIENT FACTORIES ---
 def get_gemini_client():
-    import google.generativeai as genai
-    key = get_secret("GEMINI_API_KEY")
+import google.generativeai as genai
+
+# 1. Configure your free API Key
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# 2. Call the active free-tier model 
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+# 3. Generate response within your chatbot framework
+response = model.generate_content("Your compiled RAG prompt context here")
+print(response.text)
     if not key:
         raise ValueError("GEMINI_API_KEY missing.")
     return genai.Client(api_key=key)
