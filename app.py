@@ -196,22 +196,17 @@ db = init_vector_db()
 tokenizer = get_tokenizer()
 
 # --- 6. LLM CLIENT FACTORIES ---
-if provider == "Gemini":  # Line 199
-    import google.generativeai as genai  # Line 200 (Must be indented 4 spaces!)
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-
-# 1. Configure your free API Key
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-
-# 2. Call the active free-tier model 
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-# 3. Generate response within your chatbot framework
-response = model.generate_content("Your compiled RAG prompt context here")
-print(response.text)
+def get_gemini_client():
+    """Initializes and returns the configured Gemini API client layer."""
+    import google.generativeai as genai
+    
+    key = get_secret("GEMINI_API_KEY")
     if not key:
         raise ValueError("GEMINI_API_KEY missing.")
-    return genai.Client(api_key=key)
+        
+    # Correct initialization structure for your google-generativeai==0.8.5 package
+    genai.configure(api_key=key)
+    return genai
 
 def get_groq_client():
     from groq import Groq
@@ -219,6 +214,7 @@ def get_groq_client():
     if not key:
         raise ValueError("GROQ_API_KEY missing.")
     return Groq(api_key=key)
+
 
 # --- 7. PERSISTENT CHAT HISTORY INITIALIZATION ---
 if "messages" not in st.session_state:
