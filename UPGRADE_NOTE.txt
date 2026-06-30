@@ -1,5 +1,0 @@
-This ZIP is a scaffold.
-
-The original UI is preserved.
-
-The backend integration is NOT fully rebuilt automatically.
