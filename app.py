@@ -197,7 +197,7 @@ tokenizer = get_tokenizer()
 
 # --- 6. LLM CLIENT FACTORIES ---
 def get_gemini_client():
-    from google import genai
+    import google.generativeai as genai
     key = get_secret("GEMINI_API_KEY")
     if not key:
         raise ValueError("GEMINI_API_KEY missing.")
