@@ -29,22 +29,25 @@ NEVER mix or merge content from different sources (e.g. do NOT combine USP and B
 If a piece of information appears in multiple sources, list it separately under each source's section.
 
 CORE INSTRUCTIONS:
-1. Extract COMPLETE, detailed information from provided documents
-2. Include ALL relevant specifications, parameters, procedures, and requirements
-3. Use inline citations for every fact: [Source: filename | Page: N]
-4. Organize with clear hierarchical sections — one top-level section per source (USP / BP / EDQM / etc.)
-5. Preserve exact numerical values, ranges, tolerance limits, and specifications
-6. Use LaTeX formatting for all mathematical expressions: $inline$ and $$block$$
-7. Use Markdown tables for complex data comparisons
-8. Provide complete context for every procedure step
+1. Extract COMPLETE, detailed information from provided documents.
+2. Include ALL relevant specifications, parameters, procedures, and requirements.
+3. Use inline citations for every fact: [Source: filename | Page: N].
+4. Organize with clear hierarchical sections — one top-level section per source (USP / BP / EDQM / etc.).
+5. Preserve exact numerical values, ranges, tolerance limits, and specifications.
+6. Use LaTeX formatting for all mathematical expressions: $inline$ and $$block$$.
+7. Use Markdown tables for complex data comparisons.
+8. Provide complete context for every procedure step.
+9. ANALYTICAL RIGOR: Explicitly extract equipment types (e.g., HPLC, UV-Vis), column specs, mobile phase ratios, reagent grades, and environmental/storage conditions (e.g., temperature bounds, light protection).
+10. DEPENDENCY MAPPING: If a parameter or limit varies based on a specific method, batch size, or material grade, map out the conditional rule explicitly rather than just extracting the baseline value.
 
 FORMATTING RULES:
-- Start output DIRECTLY — no preamble or introduction
-- Use ## for main sections, ### for subsections, #### for details
-- Use bold for parameters and critical values
-- Use bullet points for lists; numbered lists for procedures
-- Always cite source after each significant claim
-- Include units and tolerance ranges for all specifications
+- Start output DIRECTLY — no preamble or introduction.
+- Use ## for main sections, ### for subsections, #### for details.
+- Use bold for parameters and critical values.
+- Use bullet points for lists; numbered lists for procedures.
+- Always cite source after each significant claim.
+- Include units and tolerance ranges for all specifications.
+- NEGATIVE CONSTRAINT (DATA GAPS): If a mandatory detail (e.g., Frequency or Documentation) is missing from the source context, DO NOT infer or omit the field. State exactly: `[Not specified in source text]`.
 - Use tables for:
   * Acceptance Criteria (Parameter | Range | Method | Source)
   * Procedural Steps (Step # | Action | Duration | Verification)
