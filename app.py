@@ -253,21 +253,36 @@ SYSTEM_PROMPTS = {
     )
 }
 
-def _stream_gemini(model: str, prompt: str, placeholder) -> str:
-    client = get_gemini_client()
+def _stream_gemini(model: str, prompt: str, placeholder, system_prompt: str = None) -> str:
+    """
+    Stream Gemini response using google-generativeai (the stable SDK).
+    Never imports google.genai — that is a different, conflicting package.
+    """
+    import google.generativeai as genai
+    key = get_secret("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("GEMINI_API_KEY missing.")
+    genai.configure(api_key=key)
+
+    sys_instr = system_prompt or SYSTEM_PROMPTS["default"]
+    gemini_model = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=sys_instr,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.1,
+            max_output_tokens=8192,
+        )
+    )
+
     response_text = ""
     try:
-        from google.genai import types
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPTS["default"],
-            temperature=0.1
-        )
-        for chunk in client.models.generate_content_stream(model=model, contents=prompt, config=config):
+        for chunk in gemini_model.generate_content(prompt, stream=True):
             if chunk.text:
                 response_text += chunk.text
                 placeholder.markdown(response_text + "▌")
     except Exception:
-        response = client.models.generate_content(model=model, contents=prompt)
+        # Fallback: non-streaming
+        response = gemini_model.generate_content(prompt, stream=False)
         response_text = response.text
     placeholder.markdown(response_text)
     return response_text
@@ -284,7 +299,7 @@ def _stream_openai_compat(client, model: str, prompt: str, placeholder, system_p
             {"role": "user",   "content": prompt}
         ],
         stream=True,
-        max_tokens=4096,
+        max_tokens=8192,
         temperature=0.1
     )
     for chunk in stream:
@@ -305,35 +320,61 @@ def _no_stream_openai_compat(client, model: str, prompt: str, system_prompt: str
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": prompt}
         ],
-        max_tokens=4096,
+        max_tokens=8192,
         temperature=0.1
     )
     return resp.choices[0].message.content
 
-def generate_response(provider_name: str, model: str, prompt: str, stream: bool, placeholder, 
+def generate_response(provider_name: str, model: str, prompt: str, stream: bool, placeholder,
                      system_prompt: str = None, mode: str = None) -> Tuple[str, Dict]:
-    delays = [2, 4, 8, 16, 32]
-    max_retries = 5
-    provider_type = LLM_PROVIDERS[provider_name]["type"]
+    """
+    Call the LLM with automatic retry + exponential back-off with jitter.
+
+    Retry schedule (seconds):
+      429 / rate-limit  : 30 → 60 → 120 → 240 → 480  (doubles each attempt)
+      Other errors      :  5 → 10 →  20 →  40 →  80
+
+    Uses ONLY google-generativeai (never google.genai) to avoid namespace conflicts.
+    """
+    import random
+
+    BASE_DELAYS      = [5,  10,  20,  40,  80]   # non-rate-limit errors
+    RATE_DELAYS      = [30, 60, 120, 240, 480]   # 429 / quota errors
+    max_retries      = 5
+    provider_type    = LLM_PROVIDERS[provider_name]["type"]
 
     if system_prompt is None:
         system_prompt = SYSTEM_PROMPTS["default"]
 
     for attempt in range(max_retries):
         try:
-            start_time = time.time()
+            start_time    = time.time()
             response_text = ""
 
+            # ── Gemini ──────────────────────────────────────────────────────
             if provider_type == "gemini":
+                import google.generativeai as genai
+                key = get_secret("GEMINI_API_KEY")
+                if not key:
+                    raise ValueError("GEMINI_API_KEY missing.")
+                genai.configure(api_key=key)
+
+                gemini_model = genai.GenerativeModel(
+                    model_name=model,
+                    system_instruction=system_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=8192,
+                    )
+                )
                 if stream:
-                    response_text = _stream_gemini(model, prompt, placeholder)
+                    response_text = _stream_gemini(model, prompt, placeholder, system_prompt)
                 else:
-                    client = get_gemini_client()
-                    from google.genai import types
-                    config = types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.1)
-                    response = client.models.generate_content(model=model, contents=prompt, config=config)
+                    response      = gemini_model.generate_content(prompt, stream=False)
                     response_text = response.text
                     placeholder.markdown(response_text)
+
+            # ── Groq ────────────────────────────────────────────────────────
             elif provider_type == "groq":
                 client = get_groq_client()
                 if stream:
@@ -342,36 +383,49 @@ def generate_response(provider_name: str, model: str, prompt: str, stream: bool,
                     response_text = _no_stream_openai_compat(client, model, prompt, system_prompt)
                     placeholder.markdown(response_text)
 
-            elapsed = time.time() - start_time
+            elapsed       = time.time() - start_time
             input_tokens  = len(tokenizer.encode(prompt))
             output_tokens = len(tokenizer.encode(response_text))
 
             metadata = {
-                "provider":       provider_name,
-                "model":          model,
-                "attempt":        attempt + 1,
-                "elapsed_time":   f"{elapsed:.2f}s",
-                "input_tokens":   input_tokens,
-                "output_tokens":  output_tokens,
-                "total_tokens":   input_tokens + output_tokens,
-                "mode":           mode or "Standard"
+                "provider":     provider_name,
+                "model":        model,
+                "attempt":      attempt + 1,
+                "elapsed_time": f"{elapsed:.2f}s",
+                "input_tokens":  input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens":  input_tokens + output_tokens,
+                "mode":          mode or "Standard"
             }
-
             logger.info(f"✓ [{provider_name}] {output_tokens} tokens in {elapsed:.2f}s | Mode: {mode}")
             return response_text, metadata
 
         except Exception as e:
-            err_str = str(e)
+            err_str  = str(e)
+            is_rate  = ("429" in err_str or "rate" in err_str.lower()
+                        or "quota" in err_str.lower() or "resource_exhausted" in err_str.lower())
+            is_last  = (attempt == max_retries - 1)
+
             logger.warning(f"Attempt {attempt + 1} failed: {err_str}")
-            if "rate" in err_str.lower() or "429" in err_str:
-                wait = delays[attempt] * 2
-                st.warning(f"⏳ Rate limit hit. Waiting {wait}s before retry...")
-            elif attempt < max_retries - 1:
-                wait = delays[attempt]
-                st.warning(f"⏳ Retrying in {wait}s… (Attempt {attempt + 2}/{max_retries})")
-            else:
+
+            if is_last:
+                st.error(f"❌ All {max_retries} attempts failed. Last error: {err_str}")
                 raise
-            time.sleep(wait if "rate" in err_str.lower() or "429" in err_str else delays[attempt])
+
+            if is_rate:
+                base_wait = RATE_DELAYS[attempt]
+                wait      = base_wait + random.uniform(0, base_wait * 0.2)   # +0-20% jitter
+                st.warning(
+                    f"⏳ Rate limit / quota hit (429). "
+                    f"Waiting {wait:.0f}s before retry {attempt + 2}/{max_retries}… "
+                    f"Consider switching to Groq if this keeps happening."
+                )
+            else:
+                base_wait = BASE_DELAYS[attempt]
+                wait      = base_wait + random.uniform(0, 2)
+                st.warning(f"⏳ Error on attempt {attempt + 1}. Retrying in {wait:.0f}s… ({err_str[:120]})")
+
+            time.sleep(wait)
 
 # --- 9. CONTEXT & PROMPT BUILDERS ---
 def extract_pharmacopeia_folder(metadata: dict) -> str:
