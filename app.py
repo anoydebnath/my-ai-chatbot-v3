@@ -640,8 +640,8 @@ with st.sidebar:
     search_depth = st.slider(
         "Vector Scan Depth (Chunks)", 
         min_value=4, 
-        max_value=800, 
-        value=100,
+        max_value=100, 
+        value=50,
         help="Number of document chunks to analyze"
     )
 
